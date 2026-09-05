@@ -70,8 +70,12 @@ func TestRegisteredRoutesReachable(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(rt.method, rt.path, nil)
 		newTestRouter().ServeHTTP(rec, req)
-		if rec.Code == http.StatusNotFound {
-			t.Fatalf("%s %s answered 404, want it registered", rt.method, rt.path)
+		// A registered route is handled by our handlers, which always set the
+		// nosniff header (writeJSON/writeError). The default mux 404 does not,
+		// so this distinguishes "registered but answering a real status" (e.g.
+		// 404 for an unknown flag key) from "not registered at all".
+		if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+			t.Fatalf("%s %s answered without the nosniff header, want it registered", rt.method, rt.path)
 		}
 	}
 }
