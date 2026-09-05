@@ -1,97 +1,72 @@
 VERDICT: CHANGES_REQUESTED
 
-## Gesamtbewertung
+## Strukturierter Compliance-Bericht
 
-Geprüft wurde der sichtbare Go-Backend-Stand (`project_type: go-backend`) mit REST-API, In-Memory-Store, Logging-Middleware und Tests.  
-Die datenschutzfreundlichen Basismaßnahmen sind überwiegend gut umgesetzt: Die Logging-Middleware protokolliert keine Query-Strings, der `user`-Parameter wird nur transient zur Evaluierung genutzt, 500-Fehlertexte werden maskiert, `X-Content-Type-Options: nosniff` wird bei JSON-Antworten gesetzt und die Body-Größe ist auf 1 MiB begrenzt.
+### 1. DSGVO (Datenschutz)
 
-Es verbleiben jedoch behebbare Lücken mit Schwerpunkt auf sicherer Netzbereitstellung und CRA-Dokumentation. Diese rechtfertigen `CHANGES_REQUESTED`, nicht `BLOCKED`, da kein fundamentaler Datenschutzverstoß sichtbar ist.
+**Befund 1 — Pfad-Logging kann über Flag-Keys personenbezogene Daten verarbeiten**
+- **Schweregrad:** hoch
+- **Sachverhalt:** Die `LoggingMiddleware` in `middleware.go` protokolliert `r.URL.Path` im Klartext. Der Flag-Key ist Teil des Pfads, z. B. `GET /flags/alice@example.com/evaluate`. Die Key-Validierung (`^[A-Za-z0-9._-]+$`) lässt Zeichenfolgen zu, die personenbezogene Daten enthalten können (E-Mail-Adresse, Nutzerkennung). Enthält ein Flag-Key solche Daten, erscheinen sie unverschlüsselt im Log. Zusätzlich sind `GET /flags` und `GET /flags/{key}` ohne Authentifizierung abrufbar; auch `description` (bis 500 Zeichen) kann frei befüllt werden.
+- **Risiko:** Unkontrollierte Verarbeitung personenbezogener Daten in Logs und öffentlich abrufbaren Antworten. Verstoß gegen Datenminimierung und ggf. Verarbeitung ohne dokumentierte Rechtsgrundlage.
+- **Konkrete Abhilfe:**
+  - In `COMPLIANCE.md`, `README.md` und `SECURITY.md` verbindlich dokumentieren: **„Flag-Keys und -Descriptions dürfen keine personenbezogenen Daten enthalten. Keys dienen ausschließlich als technische Bezeichner.“**
+  - Alternativ/ergänzend die LoggingMiddleware anpassen (`middleware.go`): Den konkreten `{key}`-Segmentwert maskieren, z. B. mit einer Hilfsfunktion `maskPath(r.URL.Path)`, die das mittlere Segment durch `{key}` ersetzt, sodass geloggt wird: `GET /flags/{key}`, `PUT /flags/{key}`, `GET /flags/{key}/evaluate`. Damit bleibt der Log für Operationen nützlich, ohne potenzielle PII zu protokollieren.
 
----
+**Befund 2 — Rechtsgrundlage und Verarbeitungszweck des `user`-Parameters nicht explizit dokumentiert**
+- **Schweregrad:** mittel
+- **Sachverhalt:** Der Endpunkt `GET /flags/{key}/evaluate?user=...` verarbeitet den Parameter `user` transient. Der Code speichert ihn nicht dauerhaft und protokolliert ihn nicht (Query-String wird weggelassen). Das ist datenschutzfreundlich. Es fehlt aber eine explizite Aussage zur Rechtsgrundlage und zum Zweck der Verarbeitung.
+- **Risiko:** Unklare Verantwortlichkeit, wenn der Dienst produktiv eingesetzt wird. Der Betreiber kann nicht auf einen Blick erkennen, dass er eine Verarbeitung nachweisen muss.
+- **Konkrete Abhilfe:** In `COMPLIANCE.md` einen Abschnitt **„Verarbeitung des Evaluate-user-Parameters“** aufnehmen: Zweck (deterministische Auslieferung von Feature-Flags), Rechtsgrundlage (z. B. Art. 6 Abs. 1 lit. f DSGVO bei berechtigtem Interesse, abhängig vom konkreten Einsatzszenario), Datenminimierung (nur für die Dauer der Anfrage verarbeitet, keine Speicherung, keine Weitergabe, kein Logging).
 
-## 1. DSGVO / Datenschutz
+**Befund 3 — JSON-Body wird nur teilweise dekodiert; Rest wird verworfen**
+- **Schweregrad:** niedrig
+- **Sachverhalt:** In `flags_write.go` wird der Body mit `json.NewDecoder(r.Body).Decode(&req)` gelesen. Es wird nicht geprüft, ob nach dem ersten JSON-Objekt weitere Nicht-Whitespace-Zeichen folgen. Ein Body wie `{"key":"a","enabled":true}{"key":"b","enabled":true}` würde akzeptiert und der zweite Teil ignoriert.
+- **Risiko:** Verdeckte Datenübermittlung bzw. unerwartetes Verhalten. Für die DSGVO ist das weniger direkt, aber Sicherheits- und Integritätsrisiko.
+- **Konkrete Abhilfe:** In `flags_write.go` nach dem ersten `Decode` eine zweite Decodierung in eine leere Struktur durchführen und prüfen, dass `io.EOF` zurückkommt. Andernfalls 400 mit `{"error":"invalid JSON body"}`.
 
-### D1 — Rechtsgrundlage und Verarbeitungsnachweis fehlen im Produkt / in der Dokumentation
-- **Schwere:** mittel
-- **Datei:** `README.md`, `AGENTS.md`
-- **Befund:** Der `user`-Parameter ist eine personenbezogene Nutzerkennung. Sie wird ausschließlich transient zur deterministischen Evaluierung verarbeitet und weder gespeichert noch geloggt. Das ist technisch sauber. Rechtsgrundlage, Zweckbindung, Speicherdauer und TOMs sind aber nicht sichtbar dokumentiert.
-- **Konkrete Abhilfe:** In `README.md` ein Kapitel „Datenschutz & Betrieb“ ergänzen:
-  - Verarbeitungszweck: einmalige Evaluierung von Feature-Flags pro Nutzer
-  - Datenkategorien: Nutzerkennung (`user`), ggf. Flag-Beschreibungstexte
-  - Rechtsgrundlage: Art. 6 Abs. 1 lit. b oder lit. f DSGVO je nach Einsatz
-  - Speicherung: keine Persistenz von `user`; Flag-Definitionen nur im flüchtigen In-Memory-Store
-  - TOMs: TLS-Transport, Zugriffsschutz, Server-Timeouts, Logging ohne Query-Strings
-  - Hinweis auf DSGVO-Betroffenenrechte beim Verantwortlichen
+### 2. EU Cyber Resilience Act (CRA)
 
-### D2 — `description` ohne Längenbegrenzung
-- **Schwere:** mittel
-- **Datei:** `flags_write.go`, ergänzend `flags_write_test.go`
-- **Befund:** `description` kann bis zur Body-Grenze von 1 MiB beliebige Zeichen enthalten und wird dauerhaft im Speicher gehalten. Das ist unnötige Datensammlung und ein Speicherüberlastungsrisiko (Datenminimierung nach Art. 5 Abs. 1 lit. c DSGVO).
-- **Konkrete Abhilfe:** Eine Konstante `const maxDescriptionLength = 500` einführen und in `validDescription` prüfen. In `handleCreate` und `handleUpdate` vor dem Speichern bei Überschreitung mit `400 {"error":"description too long"}` ablehnen. Tests in `flags_write_test.go` für 500/501 Zeichen ergänzen.
+**Befund 4 — Kein dokumentierter Update-/Patch-Prozess und TLS-Vorgabe**
+- **Schweregrad:** mittel
+- **Sachverhalt:** Der Server bindet in `main.go` ausschließlich an `127.0.0.1` und spricht unverschlüsseltes HTTP. Das ist als sicherer Entwicklungs-Default gut. Für den produktiven Netzwerkbetrieb ist TLS erforderlich, aber weder im Code konfigurierbar noch in `SECURITY.md` explizit vorgeschrieben. Auch die Art und Weise, wie Updates des Dienstes eingespielt werden, ist nicht dokumentiert.
+- **Risiko:** Im Produktiveinsatz unzureichende Absicherung der Transportstrecke; unklare Update-Verantwortlichkeiten.
+- **Konkrete Abhilfe:** In `SECURITY.md` einen Abschnitt **„Betrieb und Updates“** ergänzen: Der Dienst ist in Produktion hinter einem TLS-terminierenden Reverse-Proxy zu betreiben; Updates erfolgen durch Austausch des Binaries/Containers; Stillstandzeiten sind unkritisch, da keine Persistenz besteht. Optional zusätzlich eine Konfigurationsmöglichkeit für TLS-Zertifikate im Code bereitstellen.
 
-**Positiv festgestellt:**  
-Die Middleware nutzt `r.URL.Path` statt `r.URL.RequestURI()`; der Query-String und damit der `user`-Parameter erscheint nicht in Logs. Der `user`-Parameter wird nicht persistiert. Die 500-Fehlermaskierung funktioniert über `writeError` korrekt.
+**Befund 5 — Kein Rate-Limiting auf offenen Endpunkten**
+- **Schweregrad:** mittel
+- **Sachverhalt:** Die offenen Endpunkte (`GET /healthz`, `GET /flags`, `GET /flags/{key}`, `GET /flags/{key}/evaluate`) sind ungeschützt durch `withAdminAuth`. Ein Angreifer mit Netzwerkzugriff könnte den Dienst durch viele Anfragen beeinträchtigen. Ein Rate-Limiting fehlt.
+- **Risiko:** Verfügbarkeitsrisiko, das dem Grundsatz „Security by default“ des CRA widerspricht.
+- **Konkrete Abhilfe:** In `SECURITY.md` festhalten, dass vorgelagert ein Rate-Limiter eingesetzt werden soll; optional im Code eine einfache Begrenzung (z. B. Token-Bucket) für die offenen Endpunkte implementieren. Die Implementierung darf die eigenen Tests und die Funktion nicht beeinträchtigen — Tests nutzen wenige Requests, daher unbedenklich.
 
----
+**Befund 6 — SBOM-Prozess nicht verankert**
+- **Schweregrad:** niedrig
+- **Sachverhalt:** Die Datei `sbom.spdx.json` ist vorhanden. Da keine externen Abhängigkeiten verwendet werden (nur Standardbibliothek), ist das SBOM überschaubar. Es ist jedoch nicht geregelt, wann es aktualisiert werden muss (z. B. bei künftigen `go.mod`-Änderungen).
+- **Risiko:** Veraltete SBOM, dadurch möglicher Verstoß gegen CRA-Transparenzpflichten.
+- **Konkrete Abhilfe:** In `SECURITY.md` oder `COMPLIANCE.md` einen Prozessbaustein aufnehmen: **„Bei jeder Änderung von go.mod oder Hinzufügen von Abhängigkeiten ist `sbom.spdx.json` unmittelbar zu aktualisieren.“**
 
-## 2. EU Cyber Resilience Act (CRA)
+### 3. EU AI Act
 
-### C1 — Unsichere Netzbereitstellung: kein TLS, keine Authentifizierung, offenes Bind, fehlende Server-Timeouts
-- **Schwere:** hoch
-- **Datei:** `main.go`
-- **Befund:** Der Server startet mit `http.ListenAndServe(":"+port, router)`, also:
-  - unverschlüsseltes HTTP,
-  - Bindung an alle Netzwerkinterfaces (`":port"`),
-  - keine Authentifizierung/Autorisierung für schreibende Endpunkte (`POST`, `PUT`, `DELETE`),
-  - keine `ReadHeaderTimeout`, `ReadTimeout`, `WriteTimeout`, `IdleTimeout` oder `MaxHeaderBytes` beim HTTP-Server.
-  Das verstößt gegen Security-by-Default/By-Design (CRA Annex I) und zugleich gegen Art. 32 DSGVO (Sicherheit der Verarbeitung), sobald der Dienst nicht ausschließlich in einem abgeschotteten Netz liegt.
-- **Konkrete Abhilfe in `main.go`:**
-  - Eigenen `http.Server` statt `http.ListenAndServe` nutzen, z. B.:
-    ```go
-    srv := &http.Server{
-        Addr:              "127.0.0.1:" + port, // oder dokumentiertes TLS-Offloading davor
-        Handler:           router,
-        ReadHeaderTimeout: 5 * time.Second,
-        ReadTimeout:       10 * time.Second,
-        WriteTimeout:      30 * time.Second,
-        IdleTimeout:       60 * time.Second,
-        MaxHeaderBytes:    1 << 20,
-    }
-    log.Fatal(srv.ListenAndServe())
-    ```
-  - Bei direkter Exposition `srv.ListenAndServeTLS(...)` oder dokumentierten TLS-Terminierungs-Proxy angeben.
-  - Schreibendpunkte durch eine AuthZ-Middleware (API-Key, mTLS oder Proxy-Authentifizierung) schützen oder im README verbindlich als „nur hinter authentifizierendem Reverse-Proxy betreiben“ dokumentieren.
-  - Wichtig: `httptest`-Tests umgehen den Netzwerk-Server und laufen weiter. Eine globale Auth-Middleware sollte so eingebaut werden, dass `/healthz` und die dokumentierte Evaluierung dennoch den gewünschten Zugriffsregeln folgen.
+- **Prüfung:** Im Produkt ist keine KI-Funktion implementiert. Es handelt sich um eine reine Konfigurations-/Auslieferungs-API. Der AI Act findet keine Anwendung.
 
-### C2 — Fehlende SBOM, fehlendes dokumentiertes Sicherheits- und Update-Konzept
-- **Schwere:** mittel
-- **Datei:** `README.md`, `go.mod`, Release-/CI-Konfiguration (nicht sichtbar)
-- **Befund:** Es ist keine SBOM, kein Schwachstellenmanagement und kein Update-/Patch-Verfahren sichtbar. Das Projekt nutzt zwar nur die Go-Standardbibliothek, aber die CRA-Pflichten zu dokumentierten Abhängigkeiten und Sicherheitseigenschaften bleiben bestehen.
-- **Konkrete Abhilfe:** 
-  - SBOM ab Release erzeugen und einchecken (z. B. `sbom.spdx.json` oder `cyclonedx.json`), mindestens mit Go-Version und dem Fakt „nur Standardbibliothek“.
-  - In `README.md` ein Sicherheitskapitel ergänzen: unterstützte Versionen, Update-/Patch-Prozess, Kontakt für Sicherheitsmeldungen, dokumentierte Sicherheitseigenschaften (Body-Limit, Eingabevalidierung, keine Query-Strings in Logs, nosniff).
-  - CI-Aufgabe für `go test ./...` und `go vet ./...` festhalten, damit Sicherheitsänderungen reproduzierbar geprüft werden.
+### 4. Pflichttexte & UI
+
+- **Prüfung:** Das Produkt ist ein reines Backend ohne Endnutzer-UI. Es bestehen keine Pflichten zu Impressum, Cookie-Banner, Widerrufsbelehrung oder vergleichbaren Kunden-UI-Texten.
+- **Hinweis:** Für den Betreiber des Dienstes kann dennoch eine externe Datenschutzerklärung erforderlich sein, die beschreibt, dass der `user`-Parameter transient verarbeitet wird. Das fällt jedoch nicht in den Code dieses Repositories und ist als Betreiberpflicht dokumentiert (siehe Befund 2).
+
+### 5. Barrierefreiheit (WCAG/BITV/EAA)
+
+- **Prüfung:** Da keine öffentliche Web-UI vorhanden ist, bestehen keine Barrierefreiheitsanforderungen. Die JSON-Antworten sind maschinenlesbar und benötigen keine WCAG-Konformität.
 
 ---
 
-## 3. EU AI Act
+### Zusammenfassung der positiven Aspekte
 
-Keine Befunde. Der Service enthält keine KI-Funktion im Sinne der KI-Verordnung.
+- AC-19 wird nachweislich erfüllt: Die LoggingMiddleware nutzt `r.URL.Path` und lässt den Query-String (`user`) aus; entsprechende Tests sind vorhanden.
+- AC-14: Body-Limit von 1 MiB ist korrekt umgesetzt.
+- AC-15/AC-16: Key- und User-Validierung entspricht den Vorgaben.
+- AC-17/AC-18: `X-Content-Type-Options: nosniff` und Maskierung von 500-Fehlern sind implementiert und getestet.
+- Der In-Memory-Store speichert keine personenbezogenen Daten dauerhaft; der `user`-Wert wird nicht persistiert.
+- Der Standard-Bind an `127.0.0.1` ist ein sicherer Default.
+- `sbom.spdx.json` ist vorhanden.
 
----
-
-## 4. Pflichttexte und Benutzeroberfläche
-
-Keine Befunde. Der Projekttyp ist `go-backend` ohne Endnutzer-UI. Es bestehen keine Pflichten zu Impressum, Cookie-Banner, AGB oder Datenschutzerklärung in einer Weboberfläche.
-
----
-
-## 5. Barrierefreiheit
-
-Keine Befunde. Die Zugänglichkeitsanforderungen (WCAG/BITV/EAA) greifen mangels öffentlicher Weboberfläche nicht.
-
----
-
-## Hinweis zur Verträglichkeit der geforderten Maßnahmen
-
-Die empfohlenen Sicherheitsänderungen (Timeouts, TLS/Proxy, Auth-Middleware, Description-Limit) verändern das Funktionsverhalten nicht grundlegend. Die bestehenden `httptest`-Tests prüfen die Handler direkt und bleiben weiterhin gültig; die Auth-Middleware muss lediglich so konfiguriert werden, dass der Betrieb hinter dem vorgesehenen Proxy weiterhin funktioniert.
+**Gesamtbewertung:** Es liegen keine fundamentalen Verstöße vor, die eine Sperrung erfordern. Die genannten Punkte sind behebbar und betreffen vor allem Dokumentation, Log-Maskierung und optionale Härtung. Daher `CHANGES_REQUESTED`.
