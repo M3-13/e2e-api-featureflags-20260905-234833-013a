@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 )
 
 // Server holds the dependencies shared by all HTTP handlers.
@@ -59,5 +60,14 @@ func main() {
 		port = "8080"
 	}
 	router := NewRouter(NewServer(NewStore()))
-	log.Fatal(http.ListenAndServe(":"+port, router))
+	srv := &http.Server{
+		Addr:              "127.0.0.1:" + port,
+		Handler:           withAdminAuth(router, os.Getenv("ADMIN_API_KEY")),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
+	log.Fatal(srv.ListenAndServe())
 }
