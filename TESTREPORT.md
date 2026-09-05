@@ -1,15 +1,13 @@
 VERDICT: BUGS_FOUND
 
-- **Titel**: Routing-Test wertet 404 bei unbekanntem Flag-Key fälschlich als fehlende Route
-- **Symptom**: `go test ./...` bricht mit Exit-Code 1 ab. Die Subtests `GET /flags/some-key` und `DELETE /flags/some-key` schlagen fehl, obwohl der Server gemäß AC-05/AC-07 für unbekannte Keys korrekt 404 mit JSON-Fehlerobjekt liefert. Dadurch ist AC-12 („go test ./... läuft grün durch") verletzt.
-- **Repro**: `go test ./...` im Projektverzeichnis ausführen.
+- **Title**: Go-Test-Suite schlägt fehl: `TestRoutesReachable` bewertet 404-Antworten registrierter Routen als fehlend
+- **Symptom**: `go test ./...` läuft nicht grün (Exit-Code 1, `FAIL featureflags`). AC-12 („go test ./... läuft grün durch“) ist damit nicht erfüllt; die CI-Pipeline bricht ab.
+- **Repro**: `go test ./...` ausführen. Der Fehler tritt in den Untertests `GET /flags/some-key` und `DELETE /flags/some-key` auf.
 - **Evidence**:
-  ```
-  --- FAIL: TestRoutesReachable (0.00s)
-      --- FAIL: TestRoutesReachable/GET_/flags/some-key (0.00s)
-          routing_test.go:45: GET /flags/some-key answered 404, want it registered
-      --- FAIL: TestRoutesReachable/DELETE_/flags/some-key (0.00s)
-          routing_test.go:45: DELETE /flags/some-key answered 404, want it registered
-  ```
-- **Suspected file(s)**: `routing_test.go` – der Test prüft offenbar auf einen Status ungleich 404 (oder ein anderes Kriterium), obwohl 404 bei unbekanntem Key laut Spezifikation korrekt ist. Der Handler in `flags_read.go` verhält sich spezifikationskonform.
+  - `--- FAIL: TestRoutesReachable (0.00s)`
+  - `--- FAIL: TestRoutesReachable/GET_/flags/some-key (0.00s)`
+  - `routing_test.go:45: GET /flags/some-key answered 404, want it registered`
+  - `--- FAIL: TestRoutesReachable/DELETE_/flags/some-key (0.00s)`
+  - `routing_test.go:45: DELETE /flags/some-key answered 404, want it registered`
+- **Suspected file(s)**: `routing_test.go` – die Testlogik erwartet offenbar, dass eine registrierte Route nicht mit 404 antwortet, obwohl `GET /flags/{key}` und `DELETE /flags/{key}` laut Spec bei unbekanntem Key korrekt 404 mit JSON-Fehlerobjekt liefern müssen (AC-05, AC-07). Die 404-Antwort ist hier das erwartete Produktverhalten, nicht das Fehlen der Route; der Test selbst ist zu streng/falsch und blockiert den grünen Gesamtlauf.
 - **Severity**: high
