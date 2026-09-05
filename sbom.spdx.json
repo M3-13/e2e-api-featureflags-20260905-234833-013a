@@ -1,0 +1,37 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "featureflags",
+  "documentNamespace": "https://spdx.org/spdxdocs/featureflags-1.0.0",
+  "creationInfo": {
+    "created": "2026-09-06T00:00:00Z",
+    "creators": [
+      "Tool: featureflags-sbom-generator",
+      "Organization: Feature-Flag-Service"
+    ],
+    "licenseListVersion": "3.22"
+  },
+  "packages": [
+    {
+      "name": "featureflags",
+      "SPDXID": "SPDXRef-Package-featureflags",
+      "versionInfo": "1.0.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "packageFileName": "featureflags",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "comment": "Feature-Flag-Service als REST-API in Go. Go-Version 1.22. Ausschließlich Go-Standardbibliothek (net/http, sync, log) verwendet — keine Drittabhängigkeiten."
+    }
+  ],
+  "hasExtractedLicensingInfos": [],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relatedSpdxElement": "SPDXRef-Package-featureflags",
+      "relationshipType": "DESCRIBES"
+    }
+  ]
+}
