@@ -204,6 +204,25 @@ func TestHandleUpdateInvalid(t *testing.T) {
 	}
 }
 
+func TestHandleUpdateInvalidPathKey(t *testing.T) {
+	s := newWriteTestServer()
+	cases := []string{
+		"bad key!",
+		"",
+		strings.Repeat("a", 129),
+		"slash/key",
+	}
+	for _, key := range cases {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPut, "/flags/k", strings.NewReader(`{"enabled":true}`))
+		req.SetPathValue("key", key)
+		s.handleUpdate(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("key %q status = %d, want 400", key, rec.Code)
+		}
+	}
+}
+
 func TestHandleUpdateBodyOver1MiB(t *testing.T) {
 	s := newWriteTestServer()
 	s.store.Create(Flag{Key: "k", Enabled: true})

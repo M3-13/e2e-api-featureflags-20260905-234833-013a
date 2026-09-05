@@ -97,6 +97,11 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	key := r.PathValue("key")
 
+	if !validKey(key) {
+		writeError(w, http.StatusBadRequest, "invalid key")
+		return
+	}
+
 	existing, ok := s.store.Get(key)
 	if !ok {
 		writeError(w, http.StatusNotFound, "flag not found")
