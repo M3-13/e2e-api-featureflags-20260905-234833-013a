@@ -11,7 +11,8 @@
       "port_env": "PORT",
       "health": { "path": "/healthz", "expect_status": [200] },
       "env": {
-        "PORT": { "dev": "8080" }
+        "PORT": { "dev": "8080" },
+        "ADMIN_API_KEY": { "external": true, "degraded_without": "POST/PUT/DELETE on /flags answer 503" }
       }
     }
   ]
