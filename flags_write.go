@@ -17,6 +17,27 @@ var keyPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 // maxKeyLength is the maximum allowed length of a flag key.
 const maxKeyLength = 128
 
+// maxDescriptionLength bounds a flag description to 500 characters. An empty
+// description is allowed; only a non-empty value longer than the limit is
+// rejected.
+const maxDescriptionLength = 500
+
+// validDescription reports whether s is a valid flag description: empty is
+// allowed, otherwise its length must not exceed maxDescriptionLength.
+func validDescription(s string) bool {
+	return len(s) <= maxDescriptionLength
+}
+
+// validJSONContentType reports whether the Content-Type header declares a JSON
+// body. It accepts the plain type and the common charset-suffixed form.
+func validJSONContentType(ct string) bool {
+	switch ct {
+	case "application/json", "application/json; charset=utf-8":
+		return true
+	}
+	return false
+}
+
 // validKey reports whether key is 1-128 characters long and consists only of
 // [A-Za-z0-9._-].
 func validKey(key string) bool {
@@ -47,6 +68,11 @@ type updateFlagRequest struct {
 // answers 201 with the created flag, 409 for a duplicate key, or 400 for an
 // invalid body.
 func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
+	if !validJSONContentType(r.Header.Get("Content-Type")) {
+		writeError(w, http.StatusUnsupportedMediaType, "unsupported media type")
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 
 	var req createFlagRequest
@@ -82,6 +108,10 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	if req.Description != nil {
 		description = *req.Description
 	}
+	if !validDescription(description) {
+		writeError(w, http.StatusBadRequest, "description too long")
+		return
+	}
 
 	flag := Flag{
 		Key:            *req.Key,
@@ -113,6 +143,11 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !validJSONContentType(r.Header.Get("Content-Type")) {
+		writeError(w, http.StatusUnsupportedMediaType, "unsupported media type")
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 
 	var req updateFlagRequest
@@ -132,6 +167,11 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.RolloutPercent != nil && (*req.RolloutPercent < 0 || *req.RolloutPercent > 100) {
 		writeError(w, http.StatusBadRequest, "rollout_percent must be between 0 and 100")
+		return
+	}
+
+	if req.Description != nil && !validDescription(*req.Description) {
+		writeError(w, http.StatusBadRequest, "description too long")
 		return
 	}
 
