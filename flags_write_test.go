@@ -278,3 +278,115 @@ func TestHandleUpdateBodyTooLarge(t *testing.T) {
 func jsonRollout(rp int) string {
 	return `{"key":"alpha","enabled":true,"rollout_percent":` + strconv.Itoa(rp) + `}`
 }
+
+func TestHandleCreateDescriptionAtLimit(t *testing.T) {
+	router := NewRouter(NewServer(NewStore()))
+	rec := postBody(t, router, `{"key":"alpha","enabled":true,"description":"`+strings.Repeat("x", maxDescriptionLength)+`"}`)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (body %q)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleCreateDescriptionTooLong(t *testing.T) {
+	router := NewRouter(NewServer(NewStore()))
+	rec := postBody(t, router, `{"key":"alpha","enabled":true,"description":"`+strings.Repeat("x", maxDescriptionLength+1)+`"}`)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body not JSON: %v", err)
+	}
+	if body["error"] != "description too long" {
+		t.Fatalf("error = %q, want description too long", body["error"])
+	}
+}
+
+func TestHandleUpdateDescriptionAtLimit(t *testing.T) {
+	store := NewStore()
+	if err := store.Create(Flag{Key: "alpha", Enabled: true, RolloutPercent: 100}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	router := NewRouter(NewServer(store))
+	rec := putBody(t, router, "alpha", `{"enabled":true,"description":"`+strings.Repeat("x", maxDescriptionLength)+`"}`)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %q)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleUpdateDescriptionTooLong(t *testing.T) {
+	store := NewStore()
+	if err := store.Create(Flag{Key: "alpha", Enabled: true, RolloutPercent: 100}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	router := NewRouter(NewServer(store))
+	rec := putBody(t, router, "alpha", `{"enabled":true,"description":"`+strings.Repeat("x", maxDescriptionLength+1)+`"}`)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body not JSON: %v", err)
+	}
+	if body["error"] != "description too long" {
+		t.Fatalf("error = %q, want description too long", body["error"])
+	}
+}
+
+func TestHandleCreateMissingContentType(t *testing.T) {
+	router := NewRouter(NewServer(NewStore()))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/flags", strings.NewReader(`{"key":"alpha","enabled":true}`))
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want 415", rec.Code)
+	}
+}
+
+func TestHandleCreateTextPlainContentType(t *testing.T) {
+	router := NewRouter(NewServer(NewStore()))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/flags", strings.NewReader(`{"key":"alpha","enabled":true}`))
+	req.Header.Set("Content-Type", "text/plain")
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want 415", rec.Code)
+	}
+}
+
+func TestHandleUpdateMissingContentType(t *testing.T) {
+	store := NewStore()
+	if err := store.Create(Flag{Key: "alpha", Enabled: true, RolloutPercent: 100}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	router := NewRouter(NewServer(store))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/flags/alpha", strings.NewReader(`{"enabled":true}`))
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want 415", rec.Code)
+	}
+}
+
+func TestHandleUpdateTextPlainContentType(t *testing.T) {
+	store := NewStore()
+	if err := store.Create(Flag{Key: "alpha", Enabled: true, RolloutPercent: 100}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	router := NewRouter(NewServer(store))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/flags/alpha", strings.NewReader(`{"enabled":true}`))
+	req.Header.Set("Content-Type", "text/plain")
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want 415", rec.Code)
+	}
+}
